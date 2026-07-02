@@ -45,13 +45,8 @@ jobs:
           SESSION: ${{ secrets.SESSION }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }} # GitHub PAT（需要 repo 权限，用于更新 Secrets）
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS || '7'}}           # Session 有效期配置（可选，默认 7 天 / 阈值 2 天）
-          SESSION_THRESHOLD_DAYS: ${{ vars.SESSION_THRESHOLD_DAYS || '2' }}
-          QUOTA_PER_DOLLAR: ${{ vars.QUOTA_PER_DOLLAR || '500000' }}
         run: python app.py
-
+        
       - name: 🧹 清理旧的工作流运行记录
         if: always()
         env:
