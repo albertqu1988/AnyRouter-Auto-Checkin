@@ -4,26 +4,21 @@ import os
 import sys
 import base64
 import json
+import requests
 import traceback
 from datetime import datetime, timezone, timedelta
-
-import requests
 from playwright.sync_api import sync_playwright
 
 # ============================================================
-# 配置
+# 环境变量配置
 # ============================================================
-USER_ID = os.getenv("USER_ID") or "173952"
-SESSION = os.getenv("SESSION") or "MTc4Mjk2Nzk5N3xEWDhFQVFMX2dBQUJFQUVRQUFEXzVQLUFBQWNHYzNSeWFXNW5EQVlBQkhKdmJHVURhVzUwQkFJQUFnWnpkSEpwYm1jTUNBQUdjM1JoZEhWekEybHVkQVFDQUFJR2MzUnlhVzVuREFjQUJXZHliM1Z3Qm5OMGNtbHVad3dKQUFka1pXWmhkV3gwQm5OMGNtbHVad3dGQUFOaFptWUdjM1J5YVc1bkRBWUFCRWhOUjFnR2MzUnlhVzVuREEwQUMyOWhkWFJvWDNOMFlYUmxCbk4wY21sdVp3d09BQXhCTkhZeWNrdDFia05XVUVNR2MzUnlhVzVuREFRQUFtbGtBMmx1ZEFRRkFQMEZUd0FHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dRQUE1c2FXNTFlR1J2WHpFM016azFNZz09fKughFbFl4sHiBeB3s4UApu9M0ph8mPSn9n9OMYZnGfr"
-SITE_URL = os.getenv("SITE_URL") or "https://anyrouter.top"
-
-# Telegram
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
-
-# GitHub PAT（用于更新 Secrets）
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")
+USER_ID      = os.getenv("USER_ID") or "173952"
+SESSION      = os.getenv("SESSION") or "MTc4Mjk2Nzk5N3xEWDhFQVFMX2dBQUJFQUVRQUFEXzVQLUFBQWNHYzNSeWFXNW5EQVlBQkhKdmJHVURhVzUwQkFJQUFnWnpkSEpwYm1jTUNBQUdjM1JoZEhWekEybHVkQVFDQUFJR2MzUnlhVzVuREFjQUJXZHliM1Z3Qm5OMGNtbHVad3dKQUFka1pXWmhkV3gwQm5OMGNtbHVad3dGQUFOaFptWUdjM1J5YVc1bkRBWUFCRWhOUjFnR2MzUnlhVzVuREEwQUMyOWhkWFJvWDNOMFlYUmxCbk4wY21sdVp3d09BQXhCTkhZeWNrdDFia05XVUVNR2MzUnlhVzVuREFRQUFtbGtBMmx1ZEFRRkFQMEZUd0FHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dRQUE1c2FXNTFlR1J2WHpFM016azFNZz09fKughFbFl4sHiBeB3s4UApu9M0ph8mPSn9n9OMYZnGfr"
+SITE_URL     = os.getenv("SITE_URL") or "https://anyrouter.top"
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN") or ""  # Telegram bot token,不需要通知可以留空
+TG_CHAT_ID   = os.getenv("TG_CHAT_ID") or ""    # Telegram chat id
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "") or ""  # GitHub PAT（用于更新 Secrets）
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY") or "" 
 
 # Session 有效期与阈值
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "7"))
