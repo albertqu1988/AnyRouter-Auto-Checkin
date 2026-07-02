@@ -1,17 +1,11 @@
 name: Ayrouter Daily Check-in
 
-# ============================================================
-# 触发条件
-# ============================================================
 on:
   schedule:
     - cron: '0 2 * * *'
   # 支持手动触发
   workflow_dispatch:
 
-# ============================================================
-# 权限设置（用于更新 Secrets）
-# ============================================================
 permissions:
   actions: write
   contents: read
@@ -28,7 +22,7 @@ jobs:
 
       # ---------- 安装 Python ----------
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -47,7 +41,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python app.py
         
-      - name: 🧹 清理旧的工作流运行记录
+      - name: 🧹 clear old run jobs
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
