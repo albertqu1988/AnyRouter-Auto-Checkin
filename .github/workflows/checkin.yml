@@ -1,34 +1,58 @@
-name: AnyRouter
+name: Ayrouter Daily Check-in
 
+# ============================================================
+# 触发条件
+# ============================================================
 on:
-
+  schedule:
+    - cron: '0 2 * * *'
+  # 支持手动触发
   workflow_dispatch:
 
-  schedule:
-    # 北京时间每天02:30
-    - cron: "30 18 * * *"
+# ============================================================
+# 权限设置（用于更新 Secrets）
+# ============================================================
+permissions:
+  contents: read
 
 jobs:
-
-  check:
-
+  checkin:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      # ---------- 检出代码 ----------
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      # ---------- 安装 Python ----------
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 22
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
-      - run: npm install
+      # ---------- 安装 Python 依赖 ----------
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - run: npx playwright install chromium --with-deps
+      # ---------- 安装 Playwright 浏览器 ----------
+      - name: Install Playwright browsers
+        run: python -m playwright install --with-deps chromium
 
-      - run: node index.js
+      # ---------- 运行领币脚本 ----------
+      - name: Run check-in script
         env:
-          USER_ID: ${{ secrets.USER_ID }} || 173952;
-          SESSION: ${{ secrets.SESSION }} || 'MTc4Mjk2Nzk5N3xEWDhFQVFMX2dBQUJFQUVRQUFEXzVQLUFBQWNHYzNSeWFXNW5EQVlBQkhKdmJHVURhVzUwQkFJQUFnWnpkSEpwYm1jTUNBQUdjM1JoZEhWekEybHVkQVFDQUFJR2MzUnlhVzVuREFjQUJXZHliM1Z3Qm5OMGNtbHVad3dKQUFka1pXWmhkV3gwQm5OMGNtbHVad3dGQUFOaFptWUdjM1J5YVc1bkRBWUFCRWhOUjFnR2MzUnlhVzVuREEwQUMyOWhkWFJvWDNOMFlYUmxCbk4wY21sdVp3d09BQXhCTkhZeWNrdDFia05XVUVNR2MzUnlhVzVuREFRQUFtbGtBMmx1ZEFRRkFQMEZUd0FHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dRQUE1c2FXNTFlR1J2WHpFM016azFNZz09fKughFbFl4sHiBeB3s4UApu9M0ph8mPSn9n9OMYZnGfr';
+          USER_ID: ${{ secrets.USER_ID }}
+          SESSION: ${{ secrets.SESSION }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }} # GitHub PAT（需要 repo 权限，用于更新 Secrets）
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SESSION_TTL_DAYS: ${{ vars.SESSION_TTL_DAYS || '7'}}           # Session 有效期配置（可选，默认 7 天 / 阈值 2 天）
+          SESSION_THRESHOLD_DAYS: ${{ vars.SESSION_THRESHOLD_DAYS || '2' }}
+          QUOTA_PER_DOLLAR: ${{ vars.QUOTA_PER_DOLLAR || '500000' }}
+        run: python app.py
