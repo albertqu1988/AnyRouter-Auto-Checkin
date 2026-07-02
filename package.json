@@ -1,11 +1,8 @@
 {
-  "name": "anyrouter-checkin",
-  "version": "1.0.0",
+  "name": "anyrouter",
   "type": "module",
   "dependencies": {
-    "@playwright/test": "^1.55.0",
-    "@octokit/rest": "^22.0.0",
-    "libsodium-wrappers": "^0.7.15",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.55.0"
   }
 }
