@@ -401,13 +401,13 @@ def run_checkin():
         page.wait_for_timeout(1500)
 
         # ---------- 设置 Cookies ----------
-        # 使用 url 参数（比 domain 更可靠），同时尝试 .domain 前缀
+        # 使用 domain + path（Playwright 不允许 url 和 path 同时出现）
         log("INFO", "正在设置 Cookies...")
         cookies_to_set = [
             {
                 "name": "session",
                 "value": SESSION,
-                "url": f"{SITE_URL}/",
+                "domain": SITE_DOMAIN,
                 "path": "/",
                 "httpOnly": True,
                 "secure": True,
@@ -416,7 +416,7 @@ def run_checkin():
             {
                 "name": "user_id",
                 "value": USER_ID,
-                "url": f"{SITE_URL}/",
+                "domain": SITE_DOMAIN,
                 "path": "/",
                 "httpOnly": False,
                 "secure": True,
@@ -424,6 +424,29 @@ def run_checkin():
             },
         ]
         context.add_cookies(cookies_to_set)
+
+        # 额外设置 .domain 变体（覆盖 www 子域等情况）
+        cookies_dot_domain = [
+            {
+                "name": "session",
+                "value": SESSION,
+                "domain": f".{SITE_DOMAIN}",
+                "path": "/",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            },
+            {
+                "name": "user_id",
+                "value": USER_ID,
+                "domain": f".{SITE_DOMAIN}",
+                "path": "/",
+                "httpOnly": False,
+                "secure": True,
+                "sameSite": "Lax",
+            },
+        ]
+        context.add_cookies(cookies_dot_domain)
 
         # 验证 Cookie 是否设置成功
         set_cookies = context.cookies()
