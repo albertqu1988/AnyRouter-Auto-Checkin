@@ -1,8 +1,0 @@
-{
-  "name": "anyrouter",
-  "type": "module",
-  "dependencies": {
-    "node-fetch": "^3.3.2",
-    "playwright": "^1.55.0"
-  }
-}
