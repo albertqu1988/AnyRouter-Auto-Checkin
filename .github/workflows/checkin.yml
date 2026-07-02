@@ -1,27 +1,34 @@
 name: AnyRouter
+
 on:
 
   workflow_dispatch:
+
   schedule:
-    - cron: "5 18 * * *"
+    # 北京时间每天02:30
+    - cron: "30 18 * * *"
 
 jobs:
-  run:
+
+  check:
+
     runs-on: ubuntu-latest
+
     steps:
 
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - run: npm install
+
+      - run: npx playwright install chromium --with-deps
+
+      - run: node index.js
         env:
-          USER_ID: ${{ secrets.USER_ID }}
-          SESSION: ${{ secrets.SESSION }}
+          USER_ID: ${{ secrets.USER_ID }} || 173952;
+          SESSION: ${{ secrets.SESSION }} || 'MTc4Mjk2Nzk5N3xEWDhFQVFMX2dBQUJFQUVRQUFEXzVQLUFBQWNHYzNSeWFXNW5EQVlBQkhKdmJHVURhVzUwQkFJQUFnWnpkSEpwYm1jTUNBQUdjM1JoZEhWekEybHVkQVFDQUFJR2MzUnlhVzVuREFjQUJXZHliM1Z3Qm5OMGNtbHVad3dKQUFka1pXWmhkV3gwQm5OMGNtbHVad3dGQUFOaFptWUdjM1J5YVc1bkRBWUFCRWhOUjFnR2MzUnlhVzVuREEwQUMyOWhkWFJvWDNOMFlYUmxCbk4wY21sdVp3d09BQXhCTkhZeWNrdDFia05XVUVNR2MzUnlhVzVuREFRQUFtbGtBMmx1ZEFRRkFQMEZUd0FHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dRQUE1c2FXNTFlR1J2WHpFM016azFNZz09fKughFbFl4sHiBeB3s4UApu9M0ph8mPSn9n9OMYZnGfr';
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
-          GITHUB_OWNER: ${{ secrets.GITHUB_OWNER }}
-          GITHUB_REPO: ${{ secrets.GITHUB_REPO }}
-      - run: npm install
-      - run: npx playwright install chromium --with-deps
-      - run: node index.js
