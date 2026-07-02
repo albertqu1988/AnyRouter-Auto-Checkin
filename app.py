@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Ayrouter 自动领币脚本
+Anyrouter 自动领币脚本
 =====================
 功能：
-1. 使用 Cookie 登录 https://ayrouter.top/console
+1. 使用 Cookie 登录 https://anyrouter.top/console
 2. 获取当前余额
 3. 等待 3 秒后刷新页面，重新获取余额，检查是否有变化
 4. 检查 Session 有效期是否大于 2 天，若小于则通过 GitHub PAT 更新 Secret
@@ -12,7 +12,7 @@ Ayrouter 自动领币脚本
 环境变量：
   USER_ID                - 用户 ID（默认 173952）
   SESSION                - Session Cookie 值（必填）
-  SITE_URL               - 站点地址（默认 https://ayrouter.top）
+  SITE_URL               - 站点地址（默认 https://anyrouter.top）
   TG_BOT_TOKEN           - Telegram Bot Token
   TG_CHAT_ID             - Telegram Chat ID
   GITHUB_TOKEN           - GitHub Personal Access Token（需 repo 权限）
@@ -38,11 +38,11 @@ from playwright.sync_api import sync_playwright
 # ============================================================
 USER_ID = os.getenv("USER_ID") or "173952"
 SESSION = os.getenv("SESSION") or "MTc4Mjk2Nzk5N3xEWDhFQVFMX2dBQUJFQUVRQUFEXzVQLUFBQWNHYzNSeWFXNW5EQVlBQkhKdmJHVURhVzUwQkFJQUFnWnpkSEpwYm1jTUNBQUdjM1JoZEhWekEybHVkQVFDQUFJR2MzUnlhVzVuREFjQUJXZHliM1Z3Qm5OMGNtbHVad3dKQUFka1pXWmhkV3gwQm5OMGNtbHVad3dGQUFOaFptWUdjM1J5YVc1bkRBWUFCRWhOUjFnR2MzUnlhVzVuREEwQUMyOWhkWFJvWDNOMFlYUmxCbk4wY21sdVp3d09BQXhCTkhZeWNrdDFia05XVUVNR2MzUnlhVzVuREFRQUFtbGtBMmx1ZEFRRkFQMEZUd0FHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dRQUE1c2FXNTFlR1J2WHpFM016azFNZz09fKughFbFl4sHiBeB3s4UApu9M0ph8mPSn9n9OMYZnGfr"
-SITE_URL = os.getenv("SITE_URL", "https://anyrouter.top")
+SITE_URL = os.getenv("SITE_URL") or "https://anyrouter.top"
 
 # Telegram
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN") or ""
-TG_CHAT_ID = os.getenv("TG_CHAT_ID") or ""
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 
 # GitHub PAT（用于更新 Secrets）
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -56,7 +56,7 @@ SESSION_THRESHOLD_DAYS = int(os.getenv("SESSION_THRESHOLD_DAYS", "2"))
 QUOTA_PER_DOLLAR = int(os.getenv("QUOTA_PER_DOLLAR", "500000"))
 
 # Cookie 域名
-SITE_DOMAIN = "ayrouter.top"
+SITE_DOMAIN = "anyrouter.top"
 
 
 # ============================================================
@@ -72,13 +72,26 @@ def decode_session_timestamp(session_value: str) -> int | None:
     """
     从 gorilla securecookie 格式的 SESSION 值中解码创建时间戳。
 
-    Cookie 值整体是 base64 编码，解码后格式为: timestamp|data|hmac
-    第一部分是 Unix 时间戳（秒）。
+    Cookie 值格式为: timestamp|base64(data)|base64(hmac)
+    各部分用 | 分隔，第一部分是 Unix 时间戳（十进制秒）。
+    注意：整个值不是 base64 编码的，| 是字面分隔符。
     """
     if not session_value:
         return None
 
-    # 策略 1：整体 base64 解码后分割
+    # 策略 1：直接按 | 分割（gorilla securecookie 标准格式）
+    parts = session_value.split("|")
+    if parts and parts[0].strip().isdigit():
+        return int(parts[0].strip())
+
+    # 策略 2：可能是 URL 编码的 |（%7C）
+    if "%7C" in session_value or "%7c" in session_value:
+        decoded_url = session_value.replace("%7C", "|").replace("%7c", "|")
+        parts = decoded_url.split("|")
+        if parts and parts[0].strip().isdigit():
+            return int(parts[0].strip())
+
+    # 策略 3：整体 base64 编码的情况（某些部署可能额外编码了一层）
     try:
         padded = session_value + "=" * (4 - len(session_value) % 4) if len(session_value) % 4 else session_value
         try:
@@ -86,15 +99,8 @@ def decode_session_timestamp(session_value: str) -> int | None:
         except Exception:
             decoded = base64.b64decode(padded)
 
-        parts = decoded.split(b"|")
-        if parts and parts[0].strip().isdigit():
-            return int(parts[0].strip())
-    except Exception as e:
-        log("WARN", f"base64 解码失败: {e}")
-
-    # 策略 2：直接按 | 分割（cookie 值本身含 | 的情况）
-    try:
-        parts = session_value.split("|")
+        decoded_str = decoded.decode("utf-8", errors="ignore")
+        parts = decoded_str.split("|")
         if parts and parts[0].strip().isdigit():
             return int(parts[0].strip())
     except Exception:
@@ -354,7 +360,7 @@ def run_checkin():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     log("INFO", "=" * 50)
-    log("INFO", "Ayrouter 领币脚本启动")
+    log("INFO", "Anyrouter 领币脚本启动")
     log("INFO", f"时间: {now_str}")
     log("INFO", f"用户 ID: {USER_ID}")
     log("INFO", "=" * 50)
@@ -384,12 +390,24 @@ def run_checkin():
             ),
         )
 
+        page = context.new_page()
+
+        # ---------- 先访问站点建立上下文 ----------
+        log("INFO", f"先访问 {SITE_URL}/login 建立上下文...")
+        try:
+            page.goto(f"{SITE_URL}/login", wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            log("WARN", f"首次访问失败（可忽略）: {e}")
+        page.wait_for_timeout(1500)
+
         # ---------- 设置 Cookies ----------
+        # 使用 url 参数（比 domain 更可靠），同时尝试 .domain 前缀
+        log("INFO", "正在设置 Cookies...")
         cookies_to_set = [
             {
                 "name": "session",
                 "value": SESSION,
-                "domain": SITE_DOMAIN,
+                "url": f"{SITE_URL}/",
                 "path": "/",
                 "httpOnly": True,
                 "secure": True,
@@ -398,7 +416,7 @@ def run_checkin():
             {
                 "name": "user_id",
                 "value": USER_ID,
-                "domain": SITE_DOMAIN,
+                "url": f"{SITE_URL}/",
                 "path": "/",
                 "httpOnly": False,
                 "secure": True,
@@ -406,40 +424,57 @@ def run_checkin():
             },
         ]
         context.add_cookies(cookies_to_set)
-        log("INFO", "Cookies 已设置")
 
-        page = context.new_page()
+        # 验证 Cookie 是否设置成功
+        set_cookies = context.cookies()
+        log("INFO", f"当前 Cookie 数量: {len(set_cookies)}")
+        for c in set_cookies:
+            val_preview = c["value"][:40] + "..." if len(c["value"]) > 40 else c["value"]
+            log("INFO", f"  Cookie: {c['name']} = {val_preview} (domain={c['domain']}, path={c['path']}, httpOnly={c['httpOnly']})")
 
         # ---------- 访问控制台 ----------
         log("INFO", f"正在访问 {SITE_URL}/console ...")
         try:
-            page.goto(f"{SITE_URL}/console", wait_until="networkidle", timeout=30000)
+            page.goto(f"{SITE_URL}/console", wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
             log("ERROR", f"页面加载失败: {e}")
             browser.close()
             send_telegram(
-                f"❌ <b>Ayrouter 页面加载失败</b>\n"
+                f"❌ <b>Anyrouter 页面加载失败</b>\n"
                 f"👤 账户: {USER_ID}\n"
                 f"⏱️ 时间: {now_str}\n"
                 f"错误: {e}"
             )
             sys.exit(1)
 
-        # 等待页面渲染
-        page.wait_for_timeout(3000)
+        # 等待 SPA 渲染和可能的客户端重定向
+        page.wait_for_timeout(5000)
 
         current_url = page.url
         log("INFO", f"当前 URL: {current_url}")
 
         # ---------- 检查登录状态 ----------
         if "/login" in current_url:
-            log("ERROR", "登录失败！Cookie 可能已过期，被重定向到 /login")
+            # 获取页面调试信息
+            try:
+                page_title = page.title()
+                log("ERROR", f"登录失败！被重定向到 /login (页面标题: {page_title})")
+                # 打印 Cookie 状态
+                final_cookies = context.cookies()
+                log("ERROR", f"最终 Cookie 数量: {len(final_cookies)}")
+                for c in final_cookies:
+                    log("ERROR", f"  Cookie: {c['name']} (domain={c['domain']})")
+                # 打印页面部分内容
+                body_text = page.inner_text("body")[:500] if page.query_selector("body") else "(无法获取页面内容)"
+                log("ERROR", f"页面内容预览: {body_text[:200]}")
+            except Exception:
+                log("ERROR", "登录失败！Cookie 可能已过期，被重定向到 /login")
             browser.close()
             send_telegram(
-                f"❌ <b>Ayrouter 登录失败</b>\n"
+                f"❌ <b>Anyrouter 登录失败</b>\n"
                 f"👤 账户: {USER_ID}\n"
                 f"⏱️ 时间: {now_str}\n"
-                f"📝 原因: Cookie 已过期，请尽快更新 SESSION"
+                f"📝 原因: Cookie 已过期或设置失败，请尽快更新 SESSION"
             )
             sys.exit(1)
 
@@ -559,7 +594,7 @@ def main():
         log("ERROR", f"脚本执行出错: {error_msg}")
         log("ERROR", traceback.format_exc())
         send_telegram(
-            f"❌ <b>Ayrouter 脚本异常</b>\n"
+            f"❌ <b>Anyrouter 脚本异常</b>\n"
             f"👤 账户: {USER_ID}\n"
             f"⏱️ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📝 错误: {error_msg}"
