@@ -1,27 +1,4 @@
 #!/usr/bin/env python3
-"""
-Anyrouter 自动领币脚本
-=====================
-功能：
-1. 使用 Cookie 登录 https://anyrouter.top/console
-2. 获取当前余额
-3. 等待 3 秒后刷新页面，重新获取余额，检查是否有变化
-4. 检查 Session 有效期是否大于 2 天，若小于则通过 GitHub PAT 更新 Secret
-5. 发送 Telegram 通知
-
-环境变量：
-  USER_ID                - 用户 ID（默认 173952）
-  SESSION                - Session Cookie 值（必填）
-  SITE_URL               - 站点地址（默认 https://anyrouter.top）
-  TG_BOT_TOKEN           - Telegram Bot Token
-  TG_CHAT_ID             - Telegram Chat ID
-  GITHUB_TOKEN           - GitHub Personal Access Token（需 repo 权限）
-  GITHUB_REPOSITORY      - 仓库名（格式 owner/repo）
-  SESSION_TTL_DAYS       - Session 有效期天数（默认 7）
-  SESSION_THRESHOLD_DAYS - Session 更新阈值天数（默认 2）
-  QUOTA_PER_DOLLAR       - Quota 兑换比例（默认 500000，即 500000 quota = $1）
-"""
-
 import os
 import sys
 import base64
@@ -244,6 +221,41 @@ def send_telegram(message: str) -> bool:
 # ============================================================
 # 余额提取
 # ============================================================
+def api_call(page, method: str, endpoint: str, json_body=None):
+    """
+    在浏览器上下文中通过 fetch 调用 API，自动携带 Cookie。
+    返回 (status_code, response_json)。
+    """
+    try:
+        js_code = f"""
+            async () => {{
+                try {{
+                    const opts = {{
+                        method: '{method}',
+                        credentials: 'include',
+                        headers: {{ 'Accept': 'application/json', 'Content-Type': 'application/json' }},
+                    }};
+                    const body = {json.dumps(json_body) if json_body else 'null'};
+                    if (body) opts.body = JSON.stringify(body);
+                    const res = await fetch('{endpoint}', opts);
+                    const text = await res.text();
+                    let data;
+                    try {{ data = JSON.parse(text); }} catch(e) {{ data = {{ raw: text }}; }}
+                    return {{ status: res.status, ok: res.ok, data: data }};
+                }} catch(e) {{
+                    return {{ status: 0, ok: false, data: {{ success: false, message: e.message }} }};
+                }}
+            }}
+        """
+        result = page.evaluate(js_code)
+        status = result.get("status", 0)
+        data = result.get("data", {})
+        return status, data
+    except Exception as e:
+        log("WARN", f"API 调用失败 ({method} {endpoint}): {e}")
+        return 0, {"success": False, "message": str(e)}
+
+
 def get_balance_from_api(page):
     """
     通过 /api/user/self 接口获取余额信息。
@@ -259,35 +271,50 @@ def get_balance_from_api(page):
       }
     }
     """
-    try:
-        result = page.evaluate("""
-            async () => {
-                try {
-                    const res = await fetch('/api/user/self', {
-                        credentials: 'include',
-                        headers: { 'Accept': 'application/json' },
-                    });
-                    return await res.json();
-                } catch(e) {
-                    return { success: false, message: e.message };
-                }
-            }
-        """)
+    status, result = api_call(page, "GET", "/api/user/self")
 
-        if result and result.get("success"):
-            data = result.get("data", {})
-            return {
-                "quota": data.get("quota", 0),
-                "used_quota": data.get("used_quota", 0),
-                "username": data.get("username", ""),
-                "raw": data,
-            }
-        else:
-            log("WARN", f"API 返回非成功: {result}")
-    except Exception as e:
-        log("WARN", f"API 获取余额失败: {e}")
+    if status == 200 and result and result.get("success"):
+        data = result.get("data", {})
+        return {
+            "quota": data.get("quota", 0),
+            "used_quota": data.get("used_quota", 0),
+            "username": data.get("username", ""),
+            "raw": data,
+        }
+    else:
+        log("WARN", f"API 返回非成功 (HTTP {status}): {result}")
 
     return None
+
+
+def try_checkin_api(page):
+    """
+    尝试调用领币/签到 API。
+    New API 常见端点: POST /api/user/check_in
+    """
+    endpoints = [
+        ("POST", "/api/user/check_in"),
+        ("GET", "/api/user/check_in"),
+        ("POST", "/api/user/sign_in"),
+        ("POST", "/api/user/daily_bonus"),
+        ("POST", "/api/user/aff/check_in"),
+    ]
+
+    for method, endpoint in endpoints:
+        status, result = api_call(page, method, endpoint)
+        log("INFO", f"尝试 {method} {endpoint} → HTTP {status}: {result}")
+        if status == 200 and result and result.get("success"):
+            log("INFO", f"✅ 领币成功: {endpoint}")
+            return True
+        # 如果返回 404 或 405，说明端点不存在，继续尝试下一个
+        if status in (404, 405):
+            continue
+        # 其他错误码（如 400 已签到），说明端点存在但操作不可重复
+        if status in (400, 409):
+            log("INFO", f"端点 {endpoint} 存在但操作不可重复（可能已签到）")
+            return True
+
+    return False
 
 
 def get_balance_from_dom(page) -> str | None:
@@ -392,16 +419,15 @@ def run_checkin():
 
         page = context.new_page()
 
-        # ---------- 先访问站点建立上下文 ----------
+        # ---------- 先访问站点建立上下文（获取 WAF Cookie） ----------
         log("INFO", f"先访问 {SITE_URL}/login 建立上下文...")
         try:
             page.goto(f"{SITE_URL}/login", wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
             log("WARN", f"首次访问失败（可忽略）: {e}")
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(2000)
 
         # ---------- 设置 Cookies ----------
-        # 使用 domain + path（Playwright 不允许 url 和 path 同时出现）
         log("INFO", "正在设置 Cookies...")
         cookies_to_set = [
             {
@@ -425,122 +451,78 @@ def run_checkin():
         ]
         context.add_cookies(cookies_to_set)
 
-        # 额外设置 .domain 变体（覆盖 www 子域等情况）
-        cookies_dot_domain = [
-            {
-                "name": "session",
-                "value": SESSION,
-                "domain": f".{SITE_DOMAIN}",
-                "path": "/",
-                "httpOnly": True,
-                "secure": True,
-                "sameSite": "Lax",
-            },
-            {
-                "name": "user_id",
-                "value": USER_ID,
-                "domain": f".{SITE_DOMAIN}",
-                "path": "/",
-                "httpOnly": False,
-                "secure": True,
-                "sameSite": "Lax",
-            },
-        ]
-        context.add_cookies(cookies_dot_domain)
-
         # 验证 Cookie 是否设置成功
         set_cookies = context.cookies()
         log("INFO", f"当前 Cookie 数量: {len(set_cookies)}")
         for c in set_cookies:
             val_preview = c["value"][:40] + "..." if len(c["value"]) > 40 else c["value"]
-            log("INFO", f"  Cookie: {c['name']} = {val_preview} (domain={c['domain']}, path={c['path']}, httpOnly={c['httpOnly']})")
+            log("INFO", f"  Cookie: {c['name']} = {val_preview} (domain={c['domain']})")
 
-        # ---------- 访问控制台 ----------
-        log("INFO", f"正在访问 {SITE_URL}/console ...")
-        try:
-            page.goto(f"{SITE_URL}/console", wait_until="domcontentloaded", timeout=30000)
-        except Exception as e:
-            log("ERROR", f"页面加载失败: {e}")
-            browser.close()
-            send_telegram(
-                f"❌ <b>Anyrouter 页面加载失败</b>\n"
-                f"👤 账户: {USER_ID}\n"
-                f"⏱️ 时间: {now_str}\n"
-                f"错误: {e}"
-            )
-            sys.exit(1)
+        # ---------- 通过 API 验证登录状态 ----------
+        # SPA 前端会做客户端重定向，所以不依赖页面 URL 判断登录状态
+        # 直接调用 /api/user/self 验证 Session 是否有效
+        log("INFO", "通过 API 验证登录状态...")
+        api_result_1 = get_balance_from_api(page)
 
-        # 等待 SPA 渲染和可能的客户端重定向
-        page.wait_for_timeout(5000)
-
-        current_url = page.url
-        log("INFO", f"当前 URL: {current_url}")
-
-        # ---------- 检查登录状态 ----------
-        if "/login" in current_url:
-            # 获取页面调试信息
+        if not api_result_1:
+            log("ERROR", "API 验证失败，Session 可能已过期")
+            # 打印调试信息
             try:
-                page_title = page.title()
-                log("ERROR", f"登录失败！被重定向到 /login (页面标题: {page_title})")
-                # 打印 Cookie 状态
-                final_cookies = context.cookies()
-                log("ERROR", f"最终 Cookie 数量: {len(final_cookies)}")
-                for c in final_cookies:
-                    log("ERROR", f"  Cookie: {c['name']} (domain={c['domain']})")
-                # 打印页面部分内容
-                body_text = page.inner_text("body")[:500] if page.query_selector("body") else "(无法获取页面内容)"
-                log("ERROR", f"页面内容预览: {body_text[:200]}")
+                status, debug_data = api_call(page, "GET", "/api/user/self")
+                log("ERROR", f"API 响应: HTTP {status}, Body: {str(debug_data)[:500]}")
             except Exception:
-                log("ERROR", "登录失败！Cookie 可能已过期，被重定向到 /login")
+                pass
             browser.close()
             send_telegram(
                 f"❌ <b>Anyrouter 登录失败</b>\n"
                 f"👤 账户: {USER_ID}\n"
                 f"⏱️ 时间: {now_str}\n"
-                f"📝 原因: Cookie 已过期或设置失败，请尽快更新 SESSION"
+                f"📝 原因: Session 已过期，请尽快更新 SESSION"
             )
             sys.exit(1)
 
-        log("INFO", "登录成功！")
+        log("INFO", "✅ 登录成功！（API 验证通过）")
+        username = api_result_1.get("username", "")
+        log("INFO", f"用户名: {username}")
 
-        # ---------- 获取初始余额 ----------
-        log("INFO", "获取初始余额...")
-        api_result_1 = get_balance_from_api(page)
-        dom_balance_1 = get_balance_from_dom(page)
-        first_balance = format_balance(api_result_1, dom_balance_1)
+        first_balance = format_balance(api_result_1, None)
         log("INFO", f"初始余额: {first_balance}")
-        if api_result_1:
-            log("INFO", f"API Quota: {api_result_1.get('quota')}, Used: {api_result_1.get('used_quota')}")
+        log("INFO", f"API Quota: {api_result_1.get('quota')}, Used: {api_result_1.get('used_quota')}")
 
-        # ---------- 尝试点击领币/签到按钮 ----------
-        log("INFO", "查找领币/签到按钮...")
-        clicked = False
-        for text in ["签到", "领取", "领币", "每日", "每日签到", "Check-in", "Claim", "Daily", "Sign"]:
+        # ---------- 尝试领币/签到 ----------
+        log("INFO", "尝试领币/签到...")
+        checkin_success = try_checkin_api(page)
+        if not checkin_success:
+            log("INFO", "API 领币端点未找到，尝试页面按钮方式...")
+            # 尝试导航到控制台并点击按钮
             try:
-                btn = page.locator(f"button:has-text('{text}')").first
-                if btn.is_visible(timeout=2000):
-                    btn.click()
-                    clicked = True
-                    log("INFO", f"点击了 '{text}' 按钮")
-                    page.wait_for_timeout(2000)
-                    break
-            except Exception:
-                continue
+                page.goto(f"{SITE_URL}/console", wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(3000)
+                for text in ["签到", "领取", "领币", "每日", "Check-in", "Claim", "Daily"]:
+                    try:
+                        btn = page.locator(f"button:has-text('{text}')").first
+                        if btn.is_visible(timeout=2000):
+                            btn.click()
+                            log("INFO", f"点击了 '{text}' 按钮")
+                            page.wait_for_timeout(2000)
+                            checkin_success = True
+                            break
+                    except Exception:
+                        continue
+            except Exception as e:
+                log("WARN", f"页面按钮方式失败: {e}")
 
-        if not clicked:
-            log("INFO", "未找到领币按钮，可能无需手动领取（访问页面即自动领取）")
+        if checkin_success:
+            log("INFO", "领币操作已完成")
+        else:
+            log("INFO", "未找到领币方式（可能无需手动领取）")
 
-        # ---------- 等待 3 秒后刷新页面 ----------
-        log("INFO", "等待 3 秒后刷新页面...")
+        # ---------- 等待 3 秒后重新获取余额 ----------
+        log("INFO", "等待 3 秒后重新获取余额...")
         page.wait_for_timeout(3000)
-        page.reload(wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(3000)
 
-        # ---------- 获取刷新后余额 ----------
-        log("INFO", "获取刷新后余额...")
         api_result_2 = get_balance_from_api(page)
-        dom_balance_2 = get_balance_from_dom(page)
-        second_balance = format_balance(api_result_2, dom_balance_2)
+        second_balance = format_balance(api_result_2, None)
         log("INFO", f"刷新后余额: {second_balance}")
         if api_result_2:
             log("INFO", f"API Quota: {api_result_2.get('quota')}, Used: {api_result_2.get('used_quota')}")
